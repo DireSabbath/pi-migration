@@ -33,10 +33,10 @@ if (-not $Key) { throw "missing -Key (the transfer key)" }
 
 # --------------------------------------------------------------- decrypt ----
 function Unprotect-OpenSslFile {
-	param([string]$In, [string]$Out, [string]$Password, [int]$Iterations)
-	$bytes = [IO.File]::ReadAllBytes($In)
-	if ($bytes.Length -lt 32) { throw "ciphertext too short: $In" }
-	if ([Text.Encoding]::ASCII.GetString($bytes, 0, 8) -ne 'Salted__') { throw "not an openssl salted file: $In" }
+	param([string]$Cipher, [string]$Plain, [string]$Password, [int]$Iterations)
+	$bytes = [IO.File]::ReadAllBytes($Cipher)
+	if ($bytes.Length -lt 32) { throw "ciphertext too short: $Cipher" }
+	if ([Text.Encoding]::ASCII.GetString($bytes, 0, 8) -ne 'Salted__') { throw "not an openssl salted file: $Cipher" }
 	$salt = New-Object byte[] 8
 	[Array]::Copy($bytes, 8, $salt, 0, 8)
 	$kdf = New-Object System.Security.Cryptography.Rfc2898DeriveBytes(
@@ -44,13 +44,13 @@ function Unprotect-OpenSslFile {
 	$aes = [System.Security.Cryptography.Aes]::Create()
 	$aes.Mode = 'CBC'; $aes.Padding = 'PKCS7'
 	$aes.Key = $kdf.GetBytes(32); $aes.IV = $kdf.GetBytes(16)
-	$in = New-Object IO.MemoryStream(, $bytes)
-	$null = $in.Seek(16, 'Begin')
-	$out = [IO.File]::Create($Out)
-	$cs = New-Object System.Security.Cryptography.CryptoStream($out, $aes.CreateDecryptor(), 'Write')
+	$src = New-Object IO.MemoryStream(, $bytes)
+	$null = $src.Seek(16, 'Begin')
+	$fs = [IO.File]::Create($Plain)
+	$cs = New-Object System.Security.Cryptography.CryptoStream($fs, $aes.CreateDecryptor(), 'Write')
 	$buf = New-Object byte[] (4MB)
-	while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) { $cs.Write($buf, 0, $n) }
-	$cs.FlushFinalBlock(); $cs.Dispose(); $out.Dispose(); $in.Dispose()
+	while (($n = $src.Read($buf, 0, $buf.Length)) -gt 0) { $cs.Write($buf, 0, $n) }
+	$cs.FlushFinalBlock(); $cs.Dispose(); $fs.Dispose(); $src.Dispose()
 }
 
 # -------------------------------------------------------------- expand ------
@@ -89,7 +89,7 @@ function Fetch-Stage([string]$Asset, [string]$FolderHint) {
 	$zip = Join-Path $Work ($Asset -replace '\.enc$', '')
 	if (-not (Test-Path $zip)) {
 		Say "decrypt  : $Asset"
-		Unprotect-OpenSslFile -In $enc -Out $zip -Password $Key -Iterations $Iter
+		Unprotect-OpenSslFile -Cipher $enc -Plain $zip -Password $Key -Iterations $Iter
 		Say ("           {0:N0} MB plaintext" -f ((Get-Item $zip).Length / 1MB))
 	}
 	$dir = Join-Path $Work $FolderHint
@@ -148,9 +148,8 @@ if ($Stage -in @('all', 'feiniao')) {
 		$dir = Fetch-Stage 'feiniao.zip.enc' 'feiniao'
 		$root = Find-Marker $dir 'install-feiniao.ps1'
 		if (-not $root) { throw "install-feiniao.ps1 not found in payload" }
-		$args = @()
-		if ($NoShortcut) { $args += '-NoShortcut' }
-		& (Join-Path $root 'install-feiniao.ps1') @args
+		$runner = Join-Path $root 'install-feiniao.ps1'
+		if ($NoShortcut) { & $runner -NoShortcut } else { & $runner }
 	} catch { $script:failed = $true; Warn "feiniao stage failed: $($_.Exception.Message)" }
 }
 
