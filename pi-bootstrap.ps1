@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 #  pi-bootstrap.ps1  —  Pi work environment migration, cloud side.
 #
 #  Public plaintext driver. Downloads AES-encrypted assets from the release,
